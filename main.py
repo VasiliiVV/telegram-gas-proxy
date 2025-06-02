@@ -1,45 +1,79 @@
 import os
 import logging
 import requests
-from telegram import Update
-from telegram.ext import ApplicationBuilder, MessageHandler, filters, ContextTypes
+from telegram import Update, ReplyKeyboardMarkup
+from telegram.ext import ApplicationBuilder, MessageHandler, CommandHandler, filters, ContextTypes
 
 logging.basicConfig(format='%(asctime)s - %(levelname)s - %(message)s', level=logging.INFO)
 
 TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
 GAS_WEB_APP_URL = os.getenv('GAS_WEB_APP_URL')
 
+# Определяем основное меню
+main_keyboard = ReplyKeyboardMarkup(
+    keyboard=[["Старт", "Дата"]],
+    resize_keyboard=True
+)
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "Добро пожаловать! Выбери действие:",
+        reply_markup=main_keyboard
+    )
+
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
     user_data = context.user_data
 
+    # Кнопка "Старт"
+    if text.lower() == "старт":
+        await update.message.reply_text(
+            "Бот готов к работе. Доступные функции:",
+            reply_markup=main_keyboard
+        )
+        user_data["waiting_for_date"] = False
+        return
+
+    # Ожидание ввода новой даты
     if user_data.get("waiting_for_date"):
         new_date = text.strip()
         resp = requests.post(GAS_WEB_APP_URL, json={'new_date': new_date})
         res_json = resp.json() if resp.ok else {}
         if resp.ok and res_json.get("status") == "ok":
-            await update.message.reply_text(f"Новая дата {new_date} установлена")
+            await update.message.reply_text(f"Новая дата {new_date} установлена", reply_markup=main_keyboard)
         elif resp.ok and res_json.get("status") == "error" and "формат" in res_json.get("message", "").lower():
-            await update.message.reply_text("Ошибка: неправильный формат даты! Формат должен быть ДД.ММ.ГГГГ")
+            await update.message.reply_text(
+                "Ошибка: неправильный формат даты! Формат должен быть ДД.ММ.ГГГГ",
+                reply_markup=main_keyboard
+            )
         else:
-            await update.message.reply_text("Ошибка при установке даты!")
+            await update.message.reply_text("Ошибка при установке даты!", reply_markup=main_keyboard)
         user_data["waiting_for_date"] = False
         return
 
+    # Кнопка "Дата"
     if text.lower() == "дата":
         resp = requests.get(GAS_WEB_APP_URL)
         if resp.ok:
             date = resp.json().get("date", "не указана")
-            await update.message.reply_text(f"Текущая дата: {date}\nКакую дату ставим?")
+            await update.message.reply_text(
+                f"Текущая дата: {date}\nКакую дату ставим?",
+                reply_markup=main_keyboard
+            )
             user_data["waiting_for_date"] = True
         else:
-            await update.message.reply_text("Ошибка при получении даты!")
+            await update.message.reply_text("Ошибка при получении даты!", reply_markup=main_keyboard)
         return
 
-    await update.message.reply_text("Напиши 'Дата', чтобы узнать и поменять дату.")
+    # Любое другое сообщение
+    await update.message.reply_text(
+        "Выбери действие на клавиатуре.",
+        reply_markup=main_keyboard
+    )
 
 def main():
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
+    app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.run_polling()
 
