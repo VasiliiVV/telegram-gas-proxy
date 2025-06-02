@@ -13,9 +13,9 @@ GAS_WEB_APP_URL = os.getenv('GAS_WEB_APP_URL')
 # User IDs, которым разрешён рестарт
 RESTART_ALLOWED_USER_IDS = [1411866927]  # замени на свой user_id при необходимости
 
-# Клавиатура
+# Главная клавиатура
 main_keyboard = ReplyKeyboardMarkup(
-    keyboard=[["Старт", "Дата"]],
+    keyboard=[["Старт", "Дата"], ["Обновить Интервалы"]],
     resize_keyboard=True
 )
 
@@ -39,10 +39,38 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
     user_data = context.user_data
 
+    # Кнопка "Обновить Интервалы"
+    if text.lower() == "обновить интервалы":
+        try:
+            resp = requests.post(GAS_WEB_APP_URL, json={'update_intervals': True}, timeout=15)
+            if resp.ok:
+                res_json = resp.json()
+                if res_json.get("status") == "ok":
+                    await update.message.reply_text(
+                        "Интервалы успешно обновлены!",
+                        reply_markup=main_keyboard
+                    )
+                else:
+                    await update.message.reply_text(
+                        f"Ошибка при обновлении интервалов: {res_json.get('message', 'неизвестная ошибка')}",
+                        reply_markup=main_keyboard
+                    )
+            else:
+                await update.message.reply_text(
+                    f"Ошибка HTTP {resp.status_code} при обновлении интервалов.",
+                    reply_markup=main_keyboard
+                )
+        except Exception as ex:
+            await update.message.reply_text(
+                f"Ошибка соединения: {ex}",
+                reply_markup=main_keyboard
+            )
+        return
+
     # Кнопка "Старт"
     if text.lower() == "старт":
         await update.message.reply_text(
-            "Бот готов к работе. Доступные функции:\n- Дата\n- Старт",
+            "Бот готов к работе. Доступные функции:\n- Дата\n- Обновить Интервалы\n- Старт",
             reply_markup=main_keyboard
         )
         user_data["waiting_for_date"] = False
