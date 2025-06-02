@@ -1,27 +1,20 @@
 import os
 import sys
-import asyncio
 import logging
 import requests
+import asyncio
 from flask import Flask, request
 from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 
-# Логирование
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s",
-)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
-# Конфиги
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
-GAS_WEB_APP_URL = os.environ.get("GAS_WEB_APP_URL")  # URL скрипта Google
+GAS_WEB_APP_URL = os.environ.get("GAS_WEB_APP_URL")
 
-# Flask-приложение
 app = Flask(__name__)
 
-# Клавиатура
 main_keyboard = ReplyKeyboardMarkup(
     keyboard=[
         ["Старт", "Дата"],
@@ -30,16 +23,12 @@ main_keyboard = ReplyKeyboardMarkup(
     resize_keyboard=True,
 )
 
-# Инициализация Telegram Application
 application = Application.builder().token(TELEGRAM_TOKEN).build()
 
-# ==== Хендлеры команд ====
+# === HANDLERS ===
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "Добро пожаловать! Выбери действие:",
-        reply_markup=main_keyboard
-    )
+    await update.message.reply_text("Добро пожаловать! Выбери действие:", reply_markup=main_keyboard)
 
 async def date(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
@@ -66,9 +55,7 @@ async def set_new_date(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception as e:
             await update.message.reply_text(f"Ошибка соединения с таблицей: {e}")
     else:
-        await update.message.reply_text(
-            "Ошибка: неправильный формат даты! Формат должен быть ДД.ММ.ГГГГ"
-        )
+        await update.message.reply_text("Ошибка: неправильный формат даты! Формат должен быть ДД.ММ.ГГГГ")
 
 async def update_intervals(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
@@ -85,8 +72,6 @@ async def restart_bot(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Бот будет перезапущен...")
     sys.exit(0)
 
-# ==== Роутинг входящих сообщений ====
-
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip().lower()
     if text in ["/start", "старт"]:
@@ -100,30 +85,28 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await set_new_date(update, context)
 
-# ==== Flask Webhook ====
-
-@app.route("/")
+@app.route("/", methods=["GET"])
 def index():
     return "Bot is running!", 200
 
 @app.route(f"/{TELEGRAM_TOKEN}", methods=["POST"])
 def telegram_webhook():
     update = Update.de_json(request.get_json(force=True), application.bot)
-    try:
-        loop = asyncio.get_event_loop()
-    except RuntimeError:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-    loop.run_until_complete(application.process_update(update))
+    loop = asyncio.get_event_loop()
+    loop.create_task(application.process_update(update))
     return "ok"
 
-# ==== Основной запуск ====
-
 def main():
-    # Для Render — включаем только вебхук-режим через Flask, polling не нужен!
+    # === Хендлеры ===
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     application.add_handler(CommandHandler("start", start))
+
+    # === Важно: инициализация и запуск PTB ===
+    loop = asyncio.get_event_loop()
+    loop.run_until_complete(application.initialize())
+    loop.run_until_complete(application.start())
     logger.info("Бот запущен. Ждём события на вебхуке.")
+
     app.run(host="0.0.0.0", port=10000)
 
 if __name__ == "__main__":
