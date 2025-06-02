@@ -1,105 +1,157 @@
 import os
+import sys
 import logging
+import asyncio
+import requests
 from flask import Flask, request
-from telegram import Update, Bot, ReplyKeyboardMarkup
-from telegram.ext import Application, CommandHandler, ContextTypes
+from telegram import Update, ReplyKeyboardMarkup
+from telegram.ext import (
+    Application,
+    ApplicationBuilder,
+    CommandHandler,
+    MessageHandler,
+    ContextTypes,
+    filters,
+)
+import threading
+import traceback
 
-# Логи для отладки
-logging.basicConfig(level=logging.INFO)
+# === Logging ===
+logging.basicConfig(
+    format="%(asctime)s - %(levelname)s - %(message)s",
+    level=logging.INFO
+)
 logger = logging.getLogger(__name__)
 
-TOKEN = os.environ.get("TELEGRAM_TOKEN")
-ADMIN_CHAT_ID = int(os.environ.get("ADMIN_CHAT_ID", "0"))
-GAS_WEB_APP_URL = os.environ.get("GAS_WEB_APP_URL")
+# === ENV ===
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+GAS_WEB_APP_URL = os.getenv("GAS_WEB_APP_URL")
 
-if not TOKEN or not GAS_WEB_APP_URL:
-    raise Exception("Отсутствует TELEGRAM_TOKEN или GAS_WEB_APP_URL!")
+if not TELEGRAM_TOKEN or not GAS_WEB_APP_URL:
+    logger.error("Set TELEGRAM_TOKEN and GAS_WEB_APP_URL in environment!")
+    sys.exit(1)
 
-bot = Bot(token=TOKEN)
-application = Application.builder().token(TOKEN).build()
-
+# === Flask ===
 app = Flask(__name__)
 
-# --- Кнопки ---
-keyboard = [
-    ["Старт", "Дата"],
-    ["Обновить Интервалы", "Рестарт"],
-    ["Состояние", "Обнулить_Vacancies"]
-]
-markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+# === PTB Application & Loop ===
+application = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
+ptb_loop = asyncio.new_event_loop()
 
-# --- Обработчики команд и текста ---
+# === Клавиатура ===
+main_keyboard = ReplyKeyboardMarkup(
+    keyboard=[
+        ["Старт", "Дата"],
+        ["Обновить Интервалы", "Рестарт"]
+    ],
+    resize_keyboard=True
+)
+
+# === Хендлеры ===
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "Бот готов! Используйте кнопки ниже.",
-        reply_markup=markup
+        "Добро пожаловать! Выбери действие:", reply_markup=main_keyboard
     )
 
 async def date(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Твой вызов GAS по API и возврат даты
-    await update.message.reply_text("Текущая дата: ...")
+    try:
+        resp = requests.get(GAS_WEB_APP_URL, timeout=15)
+        data = resp.json()
+        if data.get("date"):
+            await update.message.reply_text(f"Текущая дата: {data['date']}\nКакую дату ставим?")
+        else:
+            await update.message.reply_text(f"Ошибка GAS: {data}")
+    except Exception as e:
+        await update.message.reply_text(f"Ошибка соединения с таблицей: {e}")
 
 async def update_intervals(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Твой вызов GAS по API
-    await update.message.reply_text("Интервалы обновлены.")
+    try:
+        resp = requests.post(GAS_WEB_APP_URL, json={"update_intervals": True}, timeout=15)
+        data = resp.json()
+        if data.get("status") == "ok":
+            await update.message.reply_text("Интервалы успешно обновлены!")
+        else:
+            await update.message.reply_text(f"Ошибка обновления: {data.get('message', 'Неизвестная ошибка')}")
+    except Exception as e:
+        await update.message.reply_text(f"Ошибка GAS: {e}")
 
-async def restart(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Бот перезапущен.")
+async def restart_bot(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("Бот будет перезапущен...")
+    await context.application.stop()
+    sys.exit(0)
 
-async def state(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Вызов GAS по API и ответ
-    await update.message.reply_text("Статус: ...")
+async def set_new_date(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Проверка: только для текстовых сообщений!
+    if not update.message or not update.message.text:
+        return
+    new_date = update.message.text.strip()
+    import re
+    if re.match(r"^([0-2][0-9]|3[0-1])\.(0[1-9]|1[0-2])\.(\d{4})$", new_date):
+        try:
+            resp = requests.post(GAS_WEB_APP_URL, json={"new_date": new_date}, timeout=15)
+            data = resp.json()
+            if data.get("status") == "ok":
+                await update.message.reply_text(f"Новая дата {new_date} установлена")
+            else:
+                await update.message.reply_text(f"Ошибка: {data.get('message', 'Неизвестная ошибка')}")
+        except Exception as e:
+            await update.message.reply_text(f"Ошибка при установке даты: {e}")
 
-async def obnulit_vacancies(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Вызов GAS по API для обнуления
-    await update.message.reply_text("Вакансии обнулены.")
-
-# --- Подключаем обработчики ---
-application.add_handler(CommandHandler("start", start))
-application.add_handler(CommandHandler("date", date))
-application.add_handler(CommandHandler("update_intervals", update_intervals))
-application.add_handler(CommandHandler("restart", restart))
-application.add_handler(CommandHandler("state", state))
-application.add_handler(CommandHandler("obnulit_vacancies", obnulit_vacancies))
-
-# --- Обработка текстовых команд (кнопок) ---
-from telegram.ext import MessageHandler, filters
-
-async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = update.message.text.lower()
-    if text == "старт":
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Обработка только текстовых сообщений
+    if not update.message or not update.message.text:
+        return
+    text = update.message.text.strip().lower()
+    if text in ["/start", "старт"]:
         await start(update, context)
     elif text == "дата":
         await date(update, context)
     elif text == "обновить интервалы":
         await update_intervals(update, context)
     elif text == "рестарт":
-        await restart(update, context)
-    elif text == "состояние":
-        await state(update, context)
-    elif text == "обнулить_vacancies":
-        await obnulit_vacancies(update, context)
+        await restart_bot(update, context)
     else:
-        await update.message.reply_text("Неизвестная команда.", reply_markup=markup)
+        await set_new_date(update, context)
 
-application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
-
-# --- Flask endpoint ---
-@app.route(f"/{TOKEN}", methods=["POST"])
-def webhook():
-    update = Update.de_json(request.get_json(force=True), bot)
-    application.create_task(application.process_update(update))
+# === Flask интеграция с PTB ===
+@app.route(f"/{TELEGRAM_TOKEN}", methods=["POST"])
+def telegram_webhook():
+    try:
+        update = Update.de_json(request.get_json(force=True), application.bot)
+        fut = asyncio.run_coroutine_threadsafe(
+            application.process_update(update), ptb_loop
+        )
+        fut.result(timeout=30)
+    except Exception as ex:
+        logger.error(f"PTB обработка update завершилась с ошибкой: {ex}")
+        logger.error(traceback.format_exc())
     return "ok"
 
-# --- Установка вебхука при старте ---
-@app.before_first_request
-def set_webhook():
-    webhook_url = f"{os.getenv('RENDER_EXTERNAL_URL', '').rstrip('/')}/{TOKEN}"
-    if webhook_url:
-        bot.delete_webhook()
-        bot.set_webhook(webhook_url)
-        logger.info(f"Webhook set to {webhook_url}")
+# Для health-check
+@app.route("/", methods=["GET", "HEAD"])
+def index():
+    return "ok", 200
+
+def run_flask():
+    app.run(host="0.0.0.0", port=10000)
+
+def run_ptb():
+    ptb_loop.run_until_complete(application.initialize())
+    ptb_loop.run_until_complete(application.start())
+    ptb_loop.run_forever()
+
+def main():
+    # Хендлеры
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message))
+
+    # Запуск PTB в отдельном потоке
+    ptb_thread = threading.Thread(target=run_ptb, daemon=True)
+    ptb_thread.start()
+
+    logger.info("Бот запущен. Ждём события на вебхуке.")
+    run_flask()
 
 if __name__ == "__main__":
-    app.run(port=10000)
-
+    main()
