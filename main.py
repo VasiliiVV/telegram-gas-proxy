@@ -1,84 +1,105 @@
 import os
 import logging
-from flask import Flask, request, abort
 import requests
-from telegram import Update, KeyboardButton, ReplyKeyboardMarkup
+from flask import Flask, request
+from telegram import Update, ReplyKeyboardMarkup, KeyboardButton
 from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters
 
-# === КОНФИГ ===
-TOKEN = os.getenv('TELEGRAM_TOKEN')
-GAS_WEB_APP_URL = os.getenv('GAS_WEB_APP_URL')
-ADMIN_CHAT_ID = int(os.getenv("ADMIN_CHAT_ID", "0"))  # если нет — 0
-WEBHOOK_URL = f"https://{os.getenv('RENDER_EXTERNAL_HOSTNAME', 'your-app-name.onrender.com')}/{TOKEN}"
+# --- Конфиг из env ---
+TOKEN = os.getenv("TELEGRAM_TOKEN")
+GAS_WEB_APP_URL = os.getenv("GAS_WEB_APP_URL")  # url твоего GAS-скрипта
+ADMIN_CHAT_ID = int(os.getenv("ADMIN_CHAT_ID", "0"))
+WEBHOOK_URL = f"https://{os.getenv('RENDER_EXTERNAL_HOSTNAME', 'localhost')}/{TOKEN}"
 
-# === ЛОГГИРОВАНИЕ ===
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
-# === FLASK APP ===
-app = Flask(__name__)
-
-# === TELEGRAM BOT ===
-application = Application.builder().token(TOKEN).build()
-
-# === КНОПКИ ===
-MAIN_MENU = ReplyKeyboardMarkup(
-    [
-        [KeyboardButton("Старт"), KeyboardButton("Дата")],
-        [KeyboardButton("Обновить Интервалы"), KeyboardButton("Рестарт")],
-        [KeyboardButton("Состояние")],
-        [KeyboardButton("Обнулить_Vacancies")],
-    ],
-    resize_keyboard=True
+# --- Логирование ---
+logging.basicConfig(
+    format="%(asctime)s - %(levelname)s - %(message)s",
+    level=logging.INFO
 )
 
-# === ХЭНДЛЕРЫ ===
+# --- Flask ---
+app = Flask(__name__)
+
+# --- Telegram Application ---
+application = Application.builder().token(TOKEN).build()
+
+# --- Клавиатура ---
+keyboard = [
+    [KeyboardButton("Старт"), KeyboardButton("Дата")],
+    [KeyboardButton("Обновить Интервалы"), KeyboardButton("Рестарт")],
+    [KeyboardButton("Состояние"), KeyboardButton("Обнулить Вакансии")],
+]
+reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+
+# --- Основные Handlers ---
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Добро пожаловать!", reply_markup=MAIN_MENU)
+    await update.message.reply_text("Бот готов к работе!", reply_markup=reply_markup)
 
 async def date(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    resp = requests.get(GAS_WEB_APP_URL)
     try:
-        resp = requests.get(GAS_WEB_APP_URL)
         data = resp.json()
-        await update.message.reply_text(f"Текущая дата: {data.get('date', 'Ошибка!')}")
-    except Exception as e:
-        await update.message.reply_text(f"Ошибка при получении даты: {e}")
+        await update.message.reply_text(f"Текущая дата: {data['date']}", reply_markup=reply_markup)
+    except Exception:
+        await update.message.reply_text("Ошибка получения даты.", reply_markup=reply_markup)
 
 async def update_intervals(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    resp = requests.post(GAS_WEB_APP_URL, json={"update_intervals": True})
     try:
-        resp = requests.post(GAS_WEB_APP_URL, json={"update_intervals": True})
         data = resp.json()
-        await update.message.reply_text(data.get("message", "Готово!"))
-    except Exception as e:
-        await update.message.reply_text(f"Ошибка при обновлении: {e}")
+        msg = data.get('message', 'Интервалы обновлены.')
+        await update.message.reply_text(msg, reply_markup=reply_markup)
+    except Exception:
+        await update.message.reply_text("Ошибка обновления интервалов.", reply_markup=reply_markup)
 
 async def restart(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Бот будет перезапущен…")
-    os._exit(0)  # Render сам рестартанет сервис
+    await update.message.reply_text("Бот будет перезапущен…", reply_markup=reply_markup)
+    os._exit(0)
 
 async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    resp = requests.post(GAS_WEB_APP_URL, json={"status_request": True})
     try:
-        resp = requests.post(GAS_WEB_APP_URL, json={"status": True})
         data = resp.json()
-        msg = data.get("message", "Нет данных!")
-        await update.message.reply_text(msg)
-    except Exception as e:
-        await update.message.reply_text(f"Ошибка при получении статуса: {e}")
+        if data.get("status") == "ok":
+            await update.message.reply_text(
+                f"Сумма result: {data['result_sum']}\nПоследняя дата: {data['last_date']}", 
+                reply_markup=reply_markup
+            )
+        else:
+            await update.message.reply_text("Ошибка получения состояния.", reply_markup=reply_markup)
+    except Exception:
+        await update.message.reply_text("Ошибка связи с Google Sheets.", reply_markup=reply_markup)
 
 async def reset_vacancies(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.message.chat.id != ADMIN_CHAT_ID:
-        await update.message.reply_text("Нет прав.")
-        return
+    resp = requests.post(GAS_WEB_APP_URL, json={"reset_vacancies": True})
     try:
-        resp = requests.post(GAS_WEB_APP_URL, json={"reset_vacancies": True})
         data = resp.json()
-        await update.message.reply_text(data.get("message", "Таблица очищена!"))
-    except Exception as e:
-        await update.message.reply_text(f"Ошибка: {e}")
+        if data.get("status") == "ok":
+            await update.message.reply_text(data.get("message", "Таблица Intervals обнулена."), reply_markup=reply_markup)
+        else:
+            await update.message.reply_text("Ошибка при обнулении таблицы.", reply_markup=reply_markup)
+    except Exception:
+        await update.message.reply_text("Ошибка связи с Google Sheets.", reply_markup=reply_markup)
 
-async def echo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Обработка команд через текстовые кнопки
-    txt = update.message.text.lower()
+async def set_date(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text.strip()
+    # Проверяем на формат даты (ДД.ММ.ГГГГ)
+    import re
+    if re.match(r'^\d{2}\.\d{2}\.\d{4}$', text):
+        resp = requests.post(GAS_WEB_APP_URL, json={"new_date": text})
+        try:
+            data = resp.json()
+            if data.get("status") == "ok":
+                await update.message.reply_text(f"Новая дата {text} установлена", reply_markup=reply_markup)
+            else:
+                await update.message.reply_text(data.get("message", "Ошибка установки даты."), reply_markup=reply_markup)
+        except Exception:
+            await update.message.reply_text("Ошибка связи с Google Sheets.", reply_markup=reply_markup)
+
+# --- Обработчик всех текстовых сообщений ---
+async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    txt = update.message.text.strip().lower()
     if txt == "старт":
         await start(update, context)
     elif txt == "дата":
@@ -89,35 +110,37 @@ async def echo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await restart(update, context)
     elif txt == "состояние":
         await status(update, context)
-    elif txt == "обнулить_vacancies":
+    elif txt == "обнулить вакансии":
         await reset_vacancies(update, context)
     else:
-        await update.message.reply_text("Неизвестная команда.", reply_markup=MAIN_MENU)
+        # Попробуем обработать как установку даты
+        await set_date(update, context)
 
-# === ПРИВЯЗКА ХЭНДЛЕРОВ ===
+# --- Регистрация Handlers ---
 application.add_handler(CommandHandler("start", start))
-application.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), echo_handler))
+application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
 
-# === WEBHOOK ОБРАБОТЧИК ===
+# --- Flask endpoint (webhook) ---
 @app.route(f"/{TOKEN}", methods=["POST"])
 def telegram_webhook():
-    try:
-        update = Update.de_json(request.get_json(force=True), application.bot)
-        application.update_queue.put_nowait(update)
-        return "ok"
-    except Exception as e:
-        logger.error(f"Webhook error: {e}")
-        abort(500)
+    update = Update.de_json(request.get_json(force=True), application.bot)
+    application.update_queue.put_nowait(update)
+    return "OK"
 
-# === ПРИЛОЖЕНИЕ ЗАПУСК ===
-def setup_webhook():
-    from telegram import Bot
-    bot = application.bot
-    bot.delete_webhook()
-    bot.set_webhook(WEBHOOK_URL)
+# --- healthcheck ---
+@app.route("/", methods=["GET"])
+def healthcheck():
+    return "Bot is running!"
 
 if __name__ == "__main__":
-    setup_webhook()
-    logger.info("Бот запущен. Ждём события на вебхуке.")
+    # Устанавливаем webhook (асинхронно не ждем)
+    from telegram import Bot
+    bot = Bot(token=TOKEN)
+    try:
+        import asyncio
+        asyncio.get_event_loop().run_until_complete(bot.delete_webhook())
+        asyncio.get_event_loop().run_until_complete(bot.set_webhook(WEBHOOK_URL))
+    except Exception as e:
+        logging.warning(f"Ошибка установки webhook: {e}")
+    logging.info("Бот запущен. Ждём события на вебхуке.")
     app.run(host="0.0.0.0", port=10000)
-
