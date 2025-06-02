@@ -1,19 +1,21 @@
 import os
 import logging
 import requests
-import sys
 from telegram import Update, ReplyKeyboardMarkup
-from telegram.ext import ApplicationBuilder, MessageHandler, CommandHandler, filters, ContextTypes
+from telegram.ext import ApplicationBuilder, ContextTypes, MessageHandler, filters
 
-logging.basicConfig(format='%(asctime)s - %(levelname)s - %(message)s', level=logging.INFO)
+# --- НАСТРОЙКИ ---
+TELEGRAM_BOT_TOKEN = os.environ.get("BOT_TOKEN")
+GAS_WEB_APP_URL = os.environ.get("GAS_WEB_APP_URL")
+ALLOWED_CHAT_ID = os.environ.get("ALLOWED_CHAT_ID")  # можно без этой проверки, если только ты пользуешься
 
-TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
-GAS_WEB_APP_URL = os.getenv('GAS_WEB_APP_URL')
+# --- ЛОГИРОВАНИЕ ---
+logging.basicConfig(
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
+)
+logger = logging.getLogger(__name__)
 
-# Только твой user_id!
-RESTART_ALLOWED_USER_IDS = [1411866927]
-
-# Клавиатура: 2 строки — 4 кнопки
+# --- КЛАВИАТУРА ---
 main_keyboard = ReplyKeyboardMarkup(
     keyboard=[
         ["Старт", "Дата"],
@@ -22,142 +24,105 @@ main_keyboard = ReplyKeyboardMarkup(
     resize_keyboard=True
 )
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "Добро пожаловать! Выбери действие:",
-        reply_markup=main_keyboard
-    )
-
-async def restart_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    if user_id not in RESTART_ALLOWED_USER_IDS:
-        await update.message.reply_text("Нет прав на рестарт.", reply_markup=main_keyboard)
-        return
-    await update.message.reply_text("Бот будет перезапущен через 3 секунды...", reply_markup=main_keyboard)
-    await context.application.shutdown()
-    await context.application.stop()
-    os._exit(0)
-
+# --- ОБРАБОТЧИК СООБЩЕНИЙ ---
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
     text = update.message.text.strip()
-    user_data = context.user_data
 
-    # --- Кнопка "Рестарт" ---
-    if text.lower() == "рестарт":
-        user_id = update.effective_user.id
-        if user_id not in RESTART_ALLOWED_USER_IDS:
-            await update.message.reply_text("Нет прав на рестарт.", reply_markup=main_keyboard)
-            return
-        await update.message.reply_text("Бот будет перезапущен через 3 секунды...", reply_markup=main_keyboard)
-        await context.application.shutdown()
-        await context.application.stop()
-        os._exit(0)
-        return
+    # Если ты хочешь ограничить только своим ID:
+    # if str(chat_id) != str(ALLOWED_CHAT_ID):
+    #     await update.message.reply_text("Нет доступа.", reply_markup=main_keyboard)
+    #     return
 
-    # --- Кнопка "Обновить Интервалы" ---
-    if text.lower() == "обновить интервалы":
-        try:
-            resp = requests.post(GAS_WEB_APP_URL, json={'update_intervals': True}, timeout=15)
-            if resp.ok:
-                res_json = resp.json()
-                if res_json.get("status") == "ok":
-                    await update.message.reply_text(
-                        "Интервалы успешно обновлены!",
-                        reply_markup=main_keyboard
-                    )
-                else:
-                    await update.message.reply_text(
-                        f"Ошибка при обновлении интервалов: {res_json.get('message', 'неизвестная ошибка')}",
-                        reply_markup=main_keyboard
-                    )
-            else:
-                await update.message.reply_text(
-                    f"Ошибка HTTP {resp.status_code} при обновлении интервалов.",
-                    reply_markup=main_keyboard
-                )
-        except Exception as ex:
-            await update.message.reply_text(
-                f"Ошибка соединения: {ex}",
-                reply_markup=main_keyboard
-            )
-        return
-
-    # --- Кнопка "Старт" ---
-    if text.lower() == "старт":
+    if text == "Старт":
         await update.message.reply_text(
-            "Бот готов к работе. Доступные функции:\n- Дата\n- Обновить Интервалы\n- Рестарт\n- Старт",
-            reply_markup=main_keyboard
+            "Добро пожаловать! Выбери действие:", reply_markup=main_keyboard
         )
-        user_data["waiting_for_date"] = False
-        return
-
-    # --- Ожидание ввода новой даты ---
-    if user_data.get("waiting_for_date"):
-        new_date = text.strip()
+    elif text == "Дата":
         try:
-            resp = requests.post(GAS_WEB_APP_URL, json={'new_date': new_date}, timeout=10)
-            if resp.ok:
-                res_json = resp.json()
-                if res_json.get("status") == "ok":
-                    await update.message.reply_text(
-                        f"Новая дата {new_date} установлена",
-                        reply_markup=main_keyboard
-                    )
-                elif res_json.get("status") == "error" and "формат" in res_json.get("message", "").lower():
-                    await update.message.reply_text(
-                        "Ошибка: неправильный формат даты! Формат должен быть ДД.ММ.ГГГГ",
-                        reply_markup=main_keyboard
-                    )
-                else:
-                    await update.message.reply_text(
-                        f"Ошибка при установке даты! Ответ: {res_json}",
-                        reply_markup=main_keyboard
-                    )
-            else:
+            r = requests.get(GAS_WEB_APP_URL, timeout=10)
+            data = r.json()
+            if "date" in data:
                 await update.message.reply_text(
-                    f"Ошибка при установке даты! (HTTP {resp.status_code})",
+                    f"Текущая дата: {data['date']}\nКакую дату ставим?",
                     reply_markup=main_keyboard
                 )
-        except Exception as ex:
-            await update.message.reply_text(
-                f"Ошибка соединения с таблицей: {ex}",
-                reply_markup=main_keyboard
-            )
-        user_data["waiting_for_date"] = False
-        return
-
-    # --- Кнопка "Дата" ---
-    if text.lower() == "дата":
-        try:
-            resp = requests.get(GAS_WEB_APP_URL, timeout=10)
-            if resp.ok:
-                date = resp.json().get("date", "не указана")
-                await update.message.reply_text(
-                    f"Текущая дата: {date}\nКакую дату ставим?",
-                    reply_markup=main_keyboard
-                )
-                user_data["waiting_for_date"] = True
             else:
-                await update.message.reply_text("Ошибка при получении даты!", reply_markup=main_keyboard)
-        except Exception as ex:
+                await update.message.reply_text(
+                    f"Ошибка: {data.get('message', 'Нет данных!')}", reply_markup=main_keyboard
+                )
+        except Exception as e:
             await update.message.reply_text(
-                f"Ошибка соединения с таблицей: {ex}",
-                reply_markup=main_keyboard
+                f"Ошибка соединения с таблицей: {e}", reply_markup=main_keyboard
             )
-        return
 
-    # --- Любое другое сообщение ---
-    await update.message.reply_text(
-        "Выбери действие на клавиатуре.",
-        reply_markup=main_keyboard
-    )
+    elif is_valid_date(text):
+        # Если введённая строка — дата ДД.ММ.ГГГГ
+        try:
+            resp = requests.post(
+                GAS_WEB_APP_URL,
+                json={"new_date": text},
+                timeout=10
+            )
+            data = resp.json()
+            if data.get("status") == "ok":
+                await update.message.reply_text(
+                    f"Новая дата {text} установлена", reply_markup=main_keyboard
+                )
+            else:
+                await update.message.reply_text(
+                    f"Ошибка: {data.get('message', 'Не удалось обновить дату!')}", reply_markup=main_keyboard
+                )
+        except Exception as e:
+            await update.message.reply_text(
+                f"Ошибка соединения с таблицей: {e}", reply_markup=main_keyboard
+            )
 
+    elif text == "Обновить Интервалы":
+        try:
+            resp = requests.post(
+                GAS_WEB_APP_URL,
+                json={"update_intervals": True},
+                timeout=15
+            )
+            data = resp.json()
+            if data.get("status") == "ok":
+                await update.message.reply_text(
+                    "Интервалы успешно обновлены!", reply_markup=main_keyboard
+                )
+            else:
+                await update.message.reply_text(
+                    f"Ошибка: {data.get('message', 'Не удалось обновить интервалы!')}", reply_markup=main_keyboard
+                )
+        except Exception as e:
+            await update.message.reply_text(
+                f"Ошибка соединения с таблицей: {e}", reply_markup=main_keyboard
+            )
+
+    elif text == "Рестарт":
+        await update.message.reply_text("Бот будет перезапущен...", reply_markup=main_keyboard)
+        # Корректный способ рестарта на Render — завершить процесс
+        import sys
+        sys.exit(0)
+
+    else:
+        await update.message.reply_text(
+            "Выбери действие на клавиатуре.", reply_markup=main_keyboard
+        )
+
+# --- ПРОВЕРКА ДАТЫ ---
+def is_valid_date(text):
+    import re
+    return re.match(r"^([0-2][0-9]|3[0-1])\.(0[1-9]|1[0-2])\.(\d{4})$", text) is not None
+
+# --- ОСНОВНОЙ ЗАПУСК ---
 def main():
-    app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("restart", restart_command))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-    app.run_polling()
+    application = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
+
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+
+    logger.info("Бот запущен. Ожидаю сообщения в Telegram...")
+    application.run_polling()
 
 if __name__ == "__main__":
     main()
