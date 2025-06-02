@@ -1,135 +1,132 @@
 import os
 import logging
 import requests
+import asyncio
 from flask import Flask, request
-
 from telegram import (
-    Update, ReplyKeyboardMarkup, KeyboardButton
+    Bot, Update, ReplyKeyboardMarkup, KeyboardButton
 )
 from telegram.ext import (
     Application, CommandHandler, MessageHandler, ContextTypes, filters
 )
 
-TOKEN = os.environ.get('TELEGRAM_TOKEN') or 'ТВОЙ_ТОКЕН'
-GAS_URL = os.environ.get('GAS_WEB_APP_URL') or 'ТВОЙ_GAS_URL'
+# --- Настройки ---
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN") or "ТВОЙ_ТОКЕН"
+GAS_URL = os.getenv("GAS_URL") or "ТВОЙ_GAS_УРЛ"
+ADMIN_CHAT_ID = int(os.getenv("ADMIN_CHAT_ID") or "ТВОЙ_ID")  # только твой id
 
-# Настройка логов
-logging.basicConfig(
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    level=logging.INFO
-)
+# --- Логирование ---
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Flask-приложение для webhook
+# --- Flask app & PTB ---
 app = Flask(__name__)
-application = None  # экземпляр Telegram Application
+bot = Bot(token=TELEGRAM_BOT_TOKEN)
+application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
 
-# --- Меню кнопок
-main_menu = ReplyKeyboardMarkup(
-    [
-        [KeyboardButton("Старт"), KeyboardButton("Дата")],
-        [KeyboardButton("Обновить Интервалы"), KeyboardButton("Рестарт")],
-        [KeyboardButton("Состояние"), KeyboardButton("Обнулить_Vacancies")]
-    ], resize_keyboard=True
-)
+# --- Клавиатура ---
+main_keyboard = ReplyKeyboardMarkup([
+    [KeyboardButton('Старт'), KeyboardButton('Дата')],
+    [KeyboardButton('Обновить Интервалы'), KeyboardButton('Состояние')],
+    [KeyboardButton('Обнулить_Vacancies'), KeyboardButton('Рестарт')],
+], resize_keyboard=True)
 
-# --- Команды
+# --- Фильтр только для тебя ---
+def is_admin(update: Update) -> bool:
+    return update.effective_chat and update.effective_chat.id == ADMIN_CHAT_ID
+
+# --- Хендлеры ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin(update): return
     await update.message.reply_text(
-        "Добро пожаловать! Выбери действие:", reply_markup=main_menu
+        "Привет! Я бот для управления Google Таблицей.", reply_markup=main_keyboard
     )
 
-async def date_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def date(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin(update): return
     try:
-        resp = requests.get(GAS_URL)
-        data = resp.json()
-        if 'date' in data:
-            await update.message.reply_text(f"Текущая дата: {data['date']}")
-        else:
-            await update.message.reply_text(f"Ошибка: {data.get('message','Нет ответа')}")
-    except Exception as e:
-        await update.message.reply_text(f"Ошибка соединения: {e}")
+        r = requests.get(GAS_URL)
+        data = r.json()
+        await update.message.reply_text(
+            f"Текущая дата: {data.get('date', 'нет данных')}", reply_markup=main_keyboard
+        )
+    except Exception as ex:
+        await update.message.reply_text(f"Ошибка: {ex}")
 
 async def update_intervals(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin(update): return
     try:
-        resp = requests.post(GAS_URL, json={'update_intervals': True})
-        data = resp.json()
-        await update.message.reply_text(data.get('message', 'Нет ответа от GAS'))
-    except Exception as e:
-        await update.message.reply_text(f"Ошибка соединения: {e}")
+        r = requests.post(GAS_URL, json={"update_intervals": True})
+        data = r.json()
+        await update.message.reply_text(
+            data.get("message", "Ошибка обновления"), reply_markup=main_keyboard
+        )
+    except Exception as ex:
+        await update.message.reply_text(f"Ошибка: {ex}")
 
-async def restart_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Бот будет перезапущен…")
-    os._exit(0)
-
-async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def state(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin(update): return
     try:
-        resp = requests.get(GAS_URL, params={'action': 'status'})
-        data = resp.json()
-        if 'sum_result' in data and 'last_date_time' in data:
-            msg = (
-                f"Сумма result: {data['sum_result']}\n"
-                f"Последняя дата: {data['last_date_time']}"
-            )
-        else:
-            msg = f"Ошибка: {data.get('message','Нет ответа')}"
-        await update.message.reply_text(msg)
-    except Exception as e:
-        await update.message.reply_text(f"Ошибка соединения: {e}")
+        r = requests.post(GAS_URL, json={"status": True})
+        data = r.json()
+        result_sum = data.get("result_sum", "нет данных")
+        last_date = data.get("last_date", "нет данных")
+        await update.message.reply_text(
+            f"Сумма result: {result_sum}\nПоследняя дата: {last_date}",
+            reply_markup=main_keyboard
+        )
+    except Exception as ex:
+        await update.message.reply_text(f"Ошибка: {ex}")
 
-async def reset_vacancies(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def clear_vacancies(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin(update): return
     try:
-        resp = requests.post(GAS_URL, json={'reset_vacancies': True})
-        data = resp.json()
-        await update.message.reply_text(data.get('message', 'Нет ответа от GAS'))
-    except Exception as e:
-        await update.message.reply_text(f"Ошибка соединения: {e}")
+        r = requests.post(GAS_URL, json={"clear_vacancies": True})
+        data = r.json()
+        await update.message.reply_text(
+            data.get("message", "Не удалось обнулить"), reply_markup=main_keyboard
+        )
+    except Exception as ex:
+        await update.message.reply_text(f"Ошибка: {ex}")
 
-async def unknown(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "Неизвестная команда. Используй меню ниже.", reply_markup=main_menu
-    )
+async def restart(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin(update): return
+    await update.message.reply_text("Рестартую (перезапусти сервис вручную на Render)", reply_markup=main_keyboard)
 
-# --- Flask endpoint для Telegram webhook
-@app.route(f"/{TOKEN}", methods=["POST"])
-def telegram_webhook():
-    if request.method == "POST":
-        update = Update.de_json(request.get_json(force=True), application.bot)
-        application.create_task(application.process_update(update))
-        return "ok"
-    return "not allowed"
+# --- Кнопки/текстовые команды ---
+async def text_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin(update): return
+    txt = update.message.text.strip().lower()
+    if txt == "старт":
+        await start(update, context)
+    elif txt == "дата":
+        await date(update, context)
+    elif txt == "обновить интервалы":
+        await update_intervals(update, context)
+    elif txt == "состояние":
+        await state(update, context)
+    elif txt == "обнулить_vacancies":
+        await clear_vacancies(update, context)
+    elif txt == "рестарт":
+        await restart(update, context)
+    else:
+        await update.message.reply_text("Неизвестная команда.", reply_markup=main_keyboard)
 
-# --- Flask endpoint для тестов (GET /)
+# --- Роутинг PTB ---
+application.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), text_router))
+application.add_handler(CommandHandler("start", start))
+
+# --- Webhook для Telegram ---
+@app.route(f"/{TELEGRAM_BOT_TOKEN}", methods=["POST"])
+def webhook():
+    update = Update.de_json(request.get_json(force=True), bot)
+    asyncio.run(application.process_update(update))
+    return "ok"
+
 @app.route("/", methods=["GET"])
-def home():
-    return "Bot is alive!"
+def root():
+    return "Бот работает!"
 
-def main():
-    global application
-    # Telegram-бот: webhook-режим!
-    application = Application.builder().token(TOKEN).build()
-
-    # Кнопки и команды
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(MessageHandler(filters.Regex("^Старт$"), start))
-    application.add_handler(MessageHandler(filters.Regex("^Дата$"), date_command))
-    application.add_handler(MessageHandler(filters.Regex("^Обновить Интервалы$"), update_intervals))
-    application.add_handler(MessageHandler(filters.Regex("^Рестарт$"), restart_command))
-    application.add_handler(MessageHandler(filters.Regex("^Состояние$"), status_command))
-    application.add_handler(MessageHandler(filters.Regex("^Обнулить_Vacancies$"), reset_vacancies))
-    application.add_handler(MessageHandler(filters.ALL, unknown))
-
-    # Настройка webhook
-    from telegram import Bot
-    bot = Bot(TOKEN)
-    webhook_url = os.environ.get('RENDER_EXTERNAL_URL') or f"https://{os.environ.get('RENDER_SERVICE_ID','your-app')}.onrender.com/{TOKEN}"
-    bot.delete_webhook()
-    bot.set_webhook(webhook_url)
-
-    logging.info("Application started")
-    logging.info("Бот запущен. Ждём события на вебхуке.")
-    app.run(host="0.0.0.0", port=10000)
-
+# --- Запуск Flask ---
 if __name__ == "__main__":
-    main()
-
+    app.run(host="0.0.0.0", port=10000)
