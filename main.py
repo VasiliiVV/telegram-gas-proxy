@@ -6,7 +6,7 @@ from telegram import Update, KeyboardButton, ReplyKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters
 
 # === КОНФИГ ===
-TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
+TOKEN = os.getenv('TELEGRAM_TOKEN')
 GAS_WEB_APP_URL = os.getenv('GAS_WEB_APP_URL')
 ADMIN_CHAT_ID = int(os.getenv("ADMIN_CHAT_ID", "0"))  # если нет — 0
 WEBHOOK_URL = f"https://{os.getenv('RENDER_EXTERNAL_HOSTNAME', 'your-app-name.onrender.com')}/{TOKEN}"
