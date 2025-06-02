@@ -1,132 +1,123 @@
 import os
 import logging
+from flask import Flask, request, abort
 import requests
-import asyncio
-from flask import Flask, request
-from telegram import (
-    Bot, Update, ReplyKeyboardMarkup, KeyboardButton
-)
-from telegram.ext import (
-    Application, CommandHandler, MessageHandler, ContextTypes, filters
-)
+from telegram import Update, KeyboardButton, ReplyKeyboardMarkup
+from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters
 
-# --- Настройки ---
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN") or "ТВОЙ_ТОКЕН"
-GAS_URL = os.getenv("GAS_URL") or "ТВОЙ_GAS_УРЛ"
-ADMIN_CHAT_ID = int(os.getenv("ADMIN_CHAT_ID") or "ТВОЙ_ID")  # только твой id
+# === КОНФИГ ===
+TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
+GAS_WEB_APP_URL = os.getenv('GAS_WEB_APP_URL')
+ADMIN_CHAT_ID = int(os.getenv("ADMIN_CHAT_ID", "0"))  # если нет — 0
+WEBHOOK_URL = f"https://{os.getenv('RENDER_EXTERNAL_HOSTNAME', 'your-app-name.onrender.com')}/{TOKEN}"
 
-# --- Логирование ---
+# === ЛОГГИРОВАНИЕ ===
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# --- Flask app & PTB ---
+# === FLASK APP ===
 app = Flask(__name__)
-bot = Bot(token=TELEGRAM_BOT_TOKEN)
-application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
 
-# --- Клавиатура ---
-main_keyboard = ReplyKeyboardMarkup([
-    [KeyboardButton('Старт'), KeyboardButton('Дата')],
-    [KeyboardButton('Обновить Интервалы'), KeyboardButton('Состояние')],
-    [KeyboardButton('Обнулить_Vacancies'), KeyboardButton('Рестарт')],
-], resize_keyboard=True)
+# === TELEGRAM BOT ===
+application = Application.builder().token(TOKEN).build()
 
-# --- Фильтр только для тебя ---
-def is_admin(update: Update) -> bool:
-    return update.effective_chat and update.effective_chat.id == ADMIN_CHAT_ID
+# === КНОПКИ ===
+MAIN_MENU = ReplyKeyboardMarkup(
+    [
+        [KeyboardButton("Старт"), KeyboardButton("Дата")],
+        [KeyboardButton("Обновить Интервалы"), KeyboardButton("Рестарт")],
+        [KeyboardButton("Состояние")],
+        [KeyboardButton("Обнулить_Vacancies")],
+    ],
+    resize_keyboard=True
+)
 
-# --- Хендлеры ---
+# === ХЭНДЛЕРЫ ===
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not is_admin(update): return
-    await update.message.reply_text(
-        "Привет! Я бот для управления Google Таблицей.", reply_markup=main_keyboard
-    )
+    await update.message.reply_text("Добро пожаловать!", reply_markup=MAIN_MENU)
 
 async def date(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not is_admin(update): return
     try:
-        r = requests.get(GAS_URL)
-        data = r.json()
-        await update.message.reply_text(
-            f"Текущая дата: {data.get('date', 'нет данных')}", reply_markup=main_keyboard
-        )
-    except Exception as ex:
-        await update.message.reply_text(f"Ошибка: {ex}")
+        resp = requests.get(GAS_WEB_APP_URL)
+        data = resp.json()
+        await update.message.reply_text(f"Текущая дата: {data.get('date', 'Ошибка!')}")
+    except Exception as e:
+        await update.message.reply_text(f"Ошибка при получении даты: {e}")
 
 async def update_intervals(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not is_admin(update): return
     try:
-        r = requests.post(GAS_URL, json={"update_intervals": True})
-        data = r.json()
-        await update.message.reply_text(
-            data.get("message", "Ошибка обновления"), reply_markup=main_keyboard
-        )
-    except Exception as ex:
-        await update.message.reply_text(f"Ошибка: {ex}")
-
-async def state(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not is_admin(update): return
-    try:
-        r = requests.post(GAS_URL, json={"status": True})
-        data = r.json()
-        result_sum = data.get("result_sum", "нет данных")
-        last_date = data.get("last_date", "нет данных")
-        await update.message.reply_text(
-            f"Сумма result: {result_sum}\nПоследняя дата: {last_date}",
-            reply_markup=main_keyboard
-        )
-    except Exception as ex:
-        await update.message.reply_text(f"Ошибка: {ex}")
-
-async def clear_vacancies(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not is_admin(update): return
-    try:
-        r = requests.post(GAS_URL, json={"clear_vacancies": True})
-        data = r.json()
-        await update.message.reply_text(
-            data.get("message", "Не удалось обнулить"), reply_markup=main_keyboard
-        )
-    except Exception as ex:
-        await update.message.reply_text(f"Ошибка: {ex}")
+        resp = requests.post(GAS_WEB_APP_URL, json={"update_intervals": True})
+        data = resp.json()
+        await update.message.reply_text(data.get("message", "Готово!"))
+    except Exception as e:
+        await update.message.reply_text(f"Ошибка при обновлении: {e}")
 
 async def restart(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not is_admin(update): return
-    await update.message.reply_text("Рестартую (перезапусти сервис вручную на Render)", reply_markup=main_keyboard)
+    await update.message.reply_text("Бот будет перезапущен…")
+    os._exit(0)  # Render сам рестартанет сервис
 
-# --- Кнопки/текстовые команды ---
-async def text_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not is_admin(update): return
-    txt = update.message.text.strip().lower()
+async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        resp = requests.post(GAS_WEB_APP_URL, json={"status": True})
+        data = resp.json()
+        msg = data.get("message", "Нет данных!")
+        await update.message.reply_text(msg)
+    except Exception as e:
+        await update.message.reply_text(f"Ошибка при получении статуса: {e}")
+
+async def reset_vacancies(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.message.chat.id != ADMIN_CHAT_ID:
+        await update.message.reply_text("Нет прав.")
+        return
+    try:
+        resp = requests.post(GAS_WEB_APP_URL, json={"reset_vacancies": True})
+        data = resp.json()
+        await update.message.reply_text(data.get("message", "Таблица очищена!"))
+    except Exception as e:
+        await update.message.reply_text(f"Ошибка: {e}")
+
+async def echo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Обработка команд через текстовые кнопки
+    txt = update.message.text.lower()
     if txt == "старт":
         await start(update, context)
     elif txt == "дата":
         await date(update, context)
     elif txt == "обновить интервалы":
         await update_intervals(update, context)
-    elif txt == "состояние":
-        await state(update, context)
-    elif txt == "обнулить_vacancies":
-        await clear_vacancies(update, context)
     elif txt == "рестарт":
         await restart(update, context)
+    elif txt == "состояние":
+        await status(update, context)
+    elif txt == "обнулить_vacancies":
+        await reset_vacancies(update, context)
     else:
-        await update.message.reply_text("Неизвестная команда.", reply_markup=main_keyboard)
+        await update.message.reply_text("Неизвестная команда.", reply_markup=MAIN_MENU)
 
-# --- Роутинг PTB ---
-application.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), text_router))
+# === ПРИВЯЗКА ХЭНДЛЕРОВ ===
 application.add_handler(CommandHandler("start", start))
+application.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), echo_handler))
 
-# --- Webhook для Telegram ---
-@app.route(f"/{TELEGRAM_BOT_TOKEN}", methods=["POST"])
-def webhook():
-    update = Update.de_json(request.get_json(force=True), bot)
-    asyncio.run(application.process_update(update))
-    return "ok"
+# === WEBHOOK ОБРАБОТЧИК ===
+@app.route(f"/{TOKEN}", methods=["POST"])
+def telegram_webhook():
+    try:
+        update = Update.de_json(request.get_json(force=True), application.bot)
+        application.update_queue.put_nowait(update)
+        return "ok"
+    except Exception as e:
+        logger.error(f"Webhook error: {e}")
+        abort(500)
 
-@app.route("/", methods=["GET"])
-def root():
-    return "Бот работает!"
+# === ПРИЛОЖЕНИЕ ЗАПУСК ===
+def setup_webhook():
+    from telegram import Bot
+    bot = application.bot
+    bot.delete_webhook()
+    bot.set_webhook(WEBHOOK_URL)
 
-# --- Запуск Flask ---
 if __name__ == "__main__":
+    setup_webhook()
+    logger.info("Бот запущен. Ждём события на вебхуке.")
     app.run(host="0.0.0.0", port=10000)
+
