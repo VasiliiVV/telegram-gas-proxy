@@ -42,7 +42,8 @@ ptb_loop = asyncio.new_event_loop()
 main_keyboard = ReplyKeyboardMarkup(
     keyboard=[
         ["Старт", "Дата"],
-        ["Обновить Интервалы", "Рестарт"]
+        ["Обновить Интервалы", "Рестарт"],
+        ["Состояние"]
     ],
     resize_keyboard=True
 )
@@ -81,8 +82,18 @@ async def restart_bot(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await context.application.stop()
     sys.exit(0)
 
+async def get_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        resp = requests.get(f"{GAS_WEB_APP_URL}?action=status", timeout=15)
+        data = resp.json()
+        sum_result = data.get("sum_result")
+        last_date_time = data.get("last_date_time")
+        msg = f"Сумма result: {sum_result}\nПоследняя дата: {last_date_time}"
+        await update.message.reply_text(msg)
+    except Exception as e:
+        await update.message.reply_text(f"Ошибка при получении состояния: {e}")
+
 async def set_new_date(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Проверка: только для текстовых сообщений!
     if not update.message or not update.message.text:
         return
     new_date = update.message.text.strip()
@@ -99,7 +110,6 @@ async def set_new_date(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(f"Ошибка при установке даты: {e}")
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Обработка только текстовых сообщений
     if not update.message or not update.message.text:
         return
     text = update.message.text.strip().lower()
@@ -111,6 +121,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update_intervals(update, context)
     elif text == "рестарт":
         await restart_bot(update, context)
+    elif text == "состояние":
+        await get_status(update, context)
     else:
         await set_new_date(update, context)
 
@@ -142,11 +154,9 @@ def run_ptb():
     ptb_loop.run_forever()
 
 def main():
-    # Хендлеры
     application.add_handler(CommandHandler("start", start))
     application.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message))
 
-    # Запуск PTB в отдельном потоке
     ptb_thread = threading.Thread(target=run_ptb, daemon=True)
     ptb_thread.start()
 
