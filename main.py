@@ -1,24 +1,27 @@
 import os
-import logging
+import sys
 import asyncio
-
+import logging
+import requests
 from flask import Flask, request
 from telegram import Update, ReplyKeyboardMarkup
-from telegram.ext import (
-    Application, ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters,
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
+
+# Логирование
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s",
 )
+logger = logging.getLogger(__name__)
 
-# --- Настройки ---
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")  # Render env var
-GAS_WEB_APP_URL = os.getenv("GAS_WEB_APP_URL")  # Render env var
+# Конфиги
+TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
+GAS_WEB_APP_URL = os.environ.get("GAS_WEB_APP_URL")  # URL скрипта Google
 
-# --- Flask ---
+# Flask-приложение
 app = Flask(__name__)
 
-# --- Telegram Application ---
-application = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
-
-# --- Клавиатура ---
+# Клавиатура
 main_keyboard = ReplyKeyboardMarkup(
     keyboard=[
         ["Старт", "Дата"],
@@ -27,101 +30,101 @@ main_keyboard = ReplyKeyboardMarkup(
     resize_keyboard=True,
 )
 
-# --- Команды ---
+# Инициализация Telegram Application
+application = Application.builder().token(TELEGRAM_TOKEN).build()
+
+# ==== Хендлеры команд ====
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "Добро пожаловать! Выбери действие:",
-        reply_markup=main_keyboard,
+        reply_markup=main_keyboard
     )
+
+async def date(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        r = requests.get(GAS_WEB_APP_URL)
+        data = r.json()
+        if "date" in data:
+            await update.message.reply_text(f"Текущая дата: {data['date']}\nКакую дату ставим?")
+        else:
+            await update.message.reply_text(f"Ошибка чтения даты: {data}")
+    except Exception as e:
+        await update.message.reply_text(f"Ошибка соединения с таблицей: {e}")
+
+async def set_new_date(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text.strip()
+    import re
+    if re.fullmatch(r"\d{2}\.\d{2}\.\d{4}", text):
+        try:
+            r = requests.post(GAS_WEB_APP_URL, json={"new_date": text})
+            data = r.json()
+            if data.get("status") == "ok":
+                await update.message.reply_text(f"Новая дата {text} установлена")
+            else:
+                await update.message.reply_text(f"Ошибка: {data.get('message')}")
+        except Exception as e:
+            await update.message.reply_text(f"Ошибка соединения с таблицей: {e}")
+    else:
+        await update.message.reply_text(
+            "Ошибка: неправильный формат даты! Формат должен быть ДД.ММ.ГГГГ"
+        )
+
+async def update_intervals(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        r = requests.post(GAS_WEB_APP_URL, json={"update_intervals": True})
+        data = r.json()
+        if data.get("status") == "ok":
+            await update.message.reply_text("Интервалы успешно обновлены!")
+        else:
+            await update.message.reply_text(f"Ошибка: {data.get('message')}")
+    except Exception as e:
+        await update.message.reply_text(f"Ошибка соединения с таблицей: {e}")
+
+async def restart_bot(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("Бот будет перезапущен...")
+    sys.exit(0)
+
+# ==== Роутинг входящих сообщений ====
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip().lower()
-
-    if text == "старт":
+    if text in ["/start", "старт"]:
         await start(update, context)
     elif text == "дата":
-        # Получить дату из google-таблицы
-        import requests
-        try:
-            resp = requests.get(GAS_WEB_APP_URL)
-            data = resp.json()
-            if data.get("date"):
-                await update.message.reply_text(
-                    f"Текущая дата: {data['date']}\nКакую дату ставим?",
-                    reply_markup=main_keyboard,
-                )
-                context.user_data["waiting_for_date"] = True
-            else:
-                await update.message.reply_text(f"Ошибка: {data.get('message')}")
-        except Exception as e:
-            await update.message.reply_text(f"Ошибка соединения с таблицей: {e}")
-
+        await date(update, context)
     elif text == "обновить интервалы":
-        import requests
-        try:
-            resp = requests.post(GAS_WEB_APP_URL, json={"update_intervals": True})
-            data = resp.json()
-            if data.get("status") == "ok":
-                await update.message.reply_text("Интервалы успешно обновлены!", reply_markup=main_keyboard)
-            else:
-                await update.message.reply_text(f"Ошибка: {data.get('message')}")
-        except Exception as e:
-            await update.message.reply_text(f"Ошибка соединения с таблицей: {e}")
-
+        await update_intervals(update, context)
     elif text == "рестарт":
-        await update.message.reply_text("Бот будет перезапущен...", reply_markup=main_keyboard)
-        await context.application.stop()
-        # Render сам перезапустит контейнер через healthcheck
-
+        await restart_bot(update, context)
     else:
-        # Если ожидается дата
-        if context.user_data.get("waiting_for_date"):
-            import re, requests
-            date_pattern = r"^([0-2][0-9]|3[0-1])\.(0[1-9]|1[0-2])\.(\d{4})$"
-            if re.match(date_pattern, text):
-                try:
-                    resp = requests.post(GAS_WEB_APP_URL, json={"new_date": text})
-                    data = resp.json()
-                    if data.get("status") == "ok":
-                        await update.message.reply_text(
-                            f"Новая дата {data['date']} установлена",
-                            reply_markup=main_keyboard,
-                        )
-                        context.user_data["waiting_for_date"] = False
-                    else:
-                        await update.message.reply_text(f"Ошибка: {data.get('message')}")
-                except Exception as e:
-                    await update.message.reply_text(f"Ошибка соединения с таблицей: {e}")
-            else:
-                await update.message.reply_text(
-                    "Ошибка: неправильный формат даты. Формат должен быть ДД.ММ.ГГГГ"
-                )
-        else:
-            await update.message.reply_text(
-                "Выбери действие на клавиатуре.", reply_markup=main_keyboard
-            )
+        await set_new_date(update, context)
 
-# --- Telegram handlers ---
-application.add_handler(CommandHandler("start", start))
-application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+# ==== Flask Webhook ====
 
-# --- Flask endpoint for Telegram webhook ---
+@app.route("/")
+def index():
+    return "Bot is running!", 200
+
 @app.route(f"/{TELEGRAM_TOKEN}", methods=["POST"])
 def telegram_webhook():
     update = Update.de_json(request.get_json(force=True), application.bot)
-    asyncio.create_task(application.process_update(update))
+    try:
+        loop = asyncio.get_event_loop()
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+    loop.run_until_complete(application.process_update(update))
     return "ok"
 
-# --- Установка webhook ---
-async def setup_webhook():
-    await application.bot.delete_webhook()
-    webhook_url = f"https://telegram-gas-proxy-g0f8.onrender.com/{TELEGRAM_TOKEN}"
-    await application.bot.set_webhook(url=webhook_url)
-    print(f"Webhook set to: {webhook_url}")
+# ==== Основной запуск ====
+
+def main():
+    # Для Render — включаем только вебхук-режим через Flask, polling не нужен!
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    application.add_handler(CommandHandler("start", start))
+    logger.info("Бот запущен. Ждём события на вебхуке.")
+    app.run(host="0.0.0.0", port=10000)
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO)
-    asyncio.run(setup_webhook())
-    # Старт Flask-сервера (Render ожидает app.run(...))
-    app.run(host="0.0.0.0", port=10000)
+    main()
