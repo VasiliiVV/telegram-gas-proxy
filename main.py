@@ -1,21 +1,18 @@
 import os
-import logging
-import requests
-from telegram import Update, ReplyKeyboardMarkup
-from telegram.ext import ApplicationBuilder, ContextTypes, MessageHandler, filters
+from flask import Flask, request
+from telegram import Bot, Update, ReplyKeyboardMarkup
+from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters
 
-# --- НАСТРОЙКИ ---
-TELEGRAM_BOT_TOKEN = os.environ.get("BOT_TOKEN")
-GAS_WEB_APP_URL = os.environ.get("GAS_WEB_APP_URL")
-ALLOWED_CHAT_ID = os.environ.get("ALLOWED_CHAT_ID")  # можно без этой проверки, если только ты пользуешься
+# --- Конфигурация ---
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+WEBHOOK_PATH = "/" + TELEGRAM_TOKEN  # например: /7887190973:AAH.../
+WEBHOOK_PORT = int(os.getenv("PORT", 10000))
+GAS_WEB_APP_URL = os.getenv("GAS_WEB_APP_URL")
 
-# --- ЛОГИРОВАНИЕ ---
-logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
-)
-logger = logging.getLogger(__name__)
+app = Flask(__name__)
+bot = Bot(token=TELEGRAM_TOKEN)
 
-# --- КЛАВИАТУРА ---
+# --- Клавиатура ---
 main_keyboard = ReplyKeyboardMarkup(
     keyboard=[
         ["Старт", "Дата"],
@@ -24,105 +21,90 @@ main_keyboard = ReplyKeyboardMarkup(
     resize_keyboard=True
 )
 
-# --- ОБРАБОТЧИК СООБЩЕНИЙ ---
+# --- Обработка команд и кнопок ---
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "Добро пожаловать! Выбери действие:",
+        reply_markup=main_keyboard
+    )
+
+async def date(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    import requests
+    try:
+        r = requests.get(GAS_WEB_APP_URL)
+        data = r.json()
+        if "date" in data:
+            await update.message.reply_text(f"Текущая дата: {data['date']}\nКакую дату ставим?")
+            context.user_data['awaiting_new_date'] = True
+        else:
+            await update.message.reply_text("Ошибка: не удалось получить дату.")
+    except Exception as e:
+        await update.message.reply_text(f"Ошибка соединения с таблицей: {e}")
+
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat_id = update.effective_chat.id
-    text = update.message.text.strip()
+    msg = update.message.text.strip()
 
-    # Если ты хочешь ограничить только своим ID:
-    # if str(chat_id) != str(ALLOWED_CHAT_ID):
-    #     await update.message.reply_text("Нет доступа.", reply_markup=main_keyboard)
-    #     return
-
-    if text == "Старт":
-        await update.message.reply_text(
-            "Добро пожаловать! Выбери действие:", reply_markup=main_keyboard
-        )
-    elif text == "Дата":
+    if context.user_data.get('awaiting_new_date'):
+        import requests
         try:
-            r = requests.get(GAS_WEB_APP_URL, timeout=10)
+            r = requests.post(GAS_WEB_APP_URL, json={"new_date": msg})
             data = r.json()
-            if "date" in data:
-                await update.message.reply_text(
-                    f"Текущая дата: {data['date']}\nКакую дату ставим?",
-                    reply_markup=main_keyboard
-                )
-            else:
-                await update.message.reply_text(
-                    f"Ошибка: {data.get('message', 'Нет данных!')}", reply_markup=main_keyboard
-                )
-        except Exception as e:
-            await update.message.reply_text(
-                f"Ошибка соединения с таблицей: {e}", reply_markup=main_keyboard
-            )
-
-    elif is_valid_date(text):
-        # Если введённая строка — дата ДД.ММ.ГГГГ
-        try:
-            resp = requests.post(
-                GAS_WEB_APP_URL,
-                json={"new_date": text},
-                timeout=10
-            )
-            data = resp.json()
             if data.get("status") == "ok":
-                await update.message.reply_text(
-                    f"Новая дата {text} установлена", reply_markup=main_keyboard
-                )
+                await update.message.reply_text(f"Новая дата {msg} установлена")
             else:
-                await update.message.reply_text(
-                    f"Ошибка: {data.get('message', 'Не удалось обновить дату!')}", reply_markup=main_keyboard
-                )
+                await update.message.reply_text(data.get("message", "Ошибка!"))
         except Exception as e:
-            await update.message.reply_text(
-                f"Ошибка соединения с таблицей: {e}", reply_markup=main_keyboard
-            )
+            await update.message.reply_text(f"Ошибка соединения с таблицей: {e}")
+        context.user_data['awaiting_new_date'] = False
+        return
 
-    elif text == "Обновить Интервалы":
+    # Кнопки меню
+    if msg == "Старт":
+        await start(update, context)
+    elif msg == "Дата":
+        await date(update, context)
+    elif msg == "Обновить Интервалы":
+        import requests
         try:
-            resp = requests.post(
-                GAS_WEB_APP_URL,
-                json={"update_intervals": True},
-                timeout=15
-            )
-            data = resp.json()
+            r = requests.post(GAS_WEB_APP_URL, json={"update_intervals": True})
+            data = r.json()
             if data.get("status") == "ok":
-                await update.message.reply_text(
-                    "Интервалы успешно обновлены!", reply_markup=main_keyboard
-                )
+                await update.message.reply_text("Интервалы успешно обновлены!")
             else:
-                await update.message.reply_text(
-                    f"Ошибка: {data.get('message', 'Не удалось обновить интервалы!')}", reply_markup=main_keyboard
-                )
+                await update.message.reply_text(data.get("message", "Ошибка обновления!"))
         except Exception as e:
-            await update.message.reply_text(
-                f"Ошибка соединения с таблицей: {e}", reply_markup=main_keyboard
-            )
-
-    elif text == "Рестарт":
-        await update.message.reply_text("Бот будет перезапущен...", reply_markup=main_keyboard)
-        # Корректный способ рестарта на Render — завершить процесс
+            await update.message.reply_text(f"Ошибка соединения с таблицей: {e}")
+    elif msg == "Рестарт":
+        await update.message.reply_text("Бот будет перезапущен...")
         import sys
         sys.exit(0)
-
     else:
-        await update.message.reply_text(
-            "Выбери действие на клавиатуре.", reply_markup=main_keyboard
-        )
+        await update.message.reply_text("Выбери действие на клавиатуре.", reply_markup=main_keyboard)
 
-# --- ПРОВЕРКА ДАТЫ ---
-def is_valid_date(text):
-    import re
-    return re.match(r"^([0-2][0-9]|3[0-1])\.(0[1-9]|1[0-2])\.(\d{4})$", text) is not None
+# --- Интеграция с Telegram (через Application) ---
+application = Application.builder().token(TELEGRAM_TOKEN).build()
+application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+application.add_handler(CommandHandler("start", start))
 
-# --- ОСНОВНОЙ ЗАПУСК ---
-def main():
-    application = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
+# --- Flask endpoint для Telegram webhook ---
+@app.route(WEBHOOK_PATH, methods=["POST"])
+def webhook():
+    update = Update.de_json(request.get_json(force=True), bot)
+    application.update_queue.put(update)
+    return "ok", 200
 
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+@app.route("/", methods=["GET"])
+def health():
+    return "Bot is running!", 200
 
-    logger.info("Бот запущен. Ожидаю сообщения в Telegram...")
-    application.run_polling()
-
+# --- Установка webhook и запуск сервера ---
 if __name__ == "__main__":
-    main()
+    # Установка webhook на адрес Render (host/PORT/TELEGRAM_TOKEN)
+    external_url = os.getenv("RENDER_EXTERNAL_HOSTNAME")
+    webhook_url = f"https://{external_url}{WEBHOOK_PATH}"
+    bot.delete_webhook()
+    bot.set_webhook(webhook_url)
+    print(f"Webhook set to: {webhook_url}")
+
+    # Запуск Flask-сервера
+    app.run(host="0.0.0.0", port=WEBHOOK_PORT)
