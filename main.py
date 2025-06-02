@@ -10,10 +10,10 @@ logging.basicConfig(format='%(asctime)s - %(levelname)s - %(message)s', level=lo
 TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
 GAS_WEB_APP_URL = os.getenv('GAS_WEB_APP_URL')
 
-# Разрешённые пользователи (твoй user_id)
+# Только твой user_id!
 RESTART_ALLOWED_USER_IDS = [1411866927]
 
-# Клавиатура с четырьмя кнопками
+# Клавиатура: 2 строки — 4 кнопки
 main_keyboard = ReplyKeyboardMarkup(
     keyboard=[
         ["Старт", "Дата"],
@@ -42,7 +42,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
     user_data = context.user_data
 
-    # Кнопка "Рестарт"
+    # --- Кнопка "Рестарт" ---
     if text.lower() == "рестарт":
         user_id = update.effective_user.id
         if user_id not in RESTART_ALLOWED_USER_IDS:
@@ -54,7 +54,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         os._exit(0)
         return
 
-    # Кнопка "Обновить Интервалы"
+    # --- Кнопка "Обновить Интервалы" ---
     if text.lower() == "обновить интервалы":
         try:
             resp = requests.post(GAS_WEB_APP_URL, json={'update_intervals': True}, timeout=15)
@@ -82,7 +82,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
         return
 
-    # Кнопка "Старт"
+    # --- Кнопка "Старт" ---
     if text.lower() == "старт":
         await update.message.reply_text(
             "Бот готов к работе. Доступные функции:\n- Дата\n- Обновить Интервалы\n- Рестарт\n- Старт",
@@ -91,7 +91,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_data["waiting_for_date"] = False
         return
 
-    # Ожидание ввода новой даты
+    # --- Ожидание ввода новой даты ---
     if user_data.get("waiting_for_date"):
         new_date = text.strip()
         try:
@@ -126,7 +126,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_data["waiting_for_date"] = False
         return
 
-    # Кнопка "Дата"
+    # --- Кнопка "Дата" ---
     if text.lower() == "дата":
         try:
             resp = requests.get(GAS_WEB_APP_URL, timeout=10)
@@ -146,7 +146,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
         return
 
-    # Любое другое сообщение
+    # --- Любое другое сообщение ---
     await update.message.reply_text(
         "Выбери действие на клавиатуре.",
         reply_markup=main_keyboard
