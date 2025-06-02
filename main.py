@@ -5,7 +5,7 @@ from telegram.ext import Application, CommandHandler, MessageHandler, ContextTyp
 
 # --- Конфигурация ---
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-WEBHOOK_PATH = "/" + TELEGRAM_TOKEN  # например: /7887190973:AAH.../
+WEBHOOK_PATH = "/" + 7887190973:AAH1-3zcBhs97R8eymQbay8f8iV6Xfs1yus # например: /7887190973:AAH.../
 WEBHOOK_PORT = int(os.getenv("PORT", 10000))
 GAS_WEB_APP_URL = os.getenv("GAS_WEB_APP_URL")
 
