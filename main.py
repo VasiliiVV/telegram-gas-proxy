@@ -10,12 +10,15 @@ logging.basicConfig(format='%(asctime)s - %(levelname)s - %(message)s', level=lo
 TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
 GAS_WEB_APP_URL = os.getenv('GAS_WEB_APP_URL')
 
-# User IDs, которым разрешён рестарт
-RESTART_ALLOWED_USER_IDS = [1411866927]  # замени на свой user_id при необходимости
+# Разрешённые пользователи (твoй user_id)
+RESTART_ALLOWED_USER_IDS = [1411866927]
 
-# Главная клавиатура
+# Клавиатура с четырьмя кнопками
 main_keyboard = ReplyKeyboardMarkup(
-    keyboard=[["Старт", "Дата"], ["Обновить Интервалы"]],
+    keyboard=[
+        ["Старт", "Дата"],
+        ["Обновить Интервалы", "Рестарт"]
+    ],
     resize_keyboard=True
 )
 
@@ -28,9 +31,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def restart_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if user_id not in RESTART_ALLOWED_USER_IDS:
-        await update.message.reply_text("Нет прав на рестарт.")
+        await update.message.reply_text("Нет прав на рестарт.", reply_markup=main_keyboard)
         return
-    await update.message.reply_text("Бот будет перезапущен через 3 секунды...")
+    await update.message.reply_text("Бот будет перезапущен через 3 секунды...", reply_markup=main_keyboard)
     await context.application.shutdown()
     await context.application.stop()
     os._exit(0)
@@ -38,6 +41,18 @@ async def restart_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
     user_data = context.user_data
+
+    # Кнопка "Рестарт"
+    if text.lower() == "рестарт":
+        user_id = update.effective_user.id
+        if user_id not in RESTART_ALLOWED_USER_IDS:
+            await update.message.reply_text("Нет прав на рестарт.", reply_markup=main_keyboard)
+            return
+        await update.message.reply_text("Бот будет перезапущен через 3 секунды...", reply_markup=main_keyboard)
+        await context.application.shutdown()
+        await context.application.stop()
+        os._exit(0)
+        return
 
     # Кнопка "Обновить Интервалы"
     if text.lower() == "обновить интервалы":
@@ -70,7 +85,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Кнопка "Старт"
     if text.lower() == "старт":
         await update.message.reply_text(
-            "Бот готов к работе. Доступные функции:\n- Дата\n- Обновить Интервалы\n- Старт",
+            "Бот готов к работе. Доступные функции:\n- Дата\n- Обновить Интервалы\n- Рестарт\n- Старт",
             reply_markup=main_keyboard
         )
         user_data["waiting_for_date"] = False
