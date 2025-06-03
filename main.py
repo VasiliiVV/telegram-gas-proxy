@@ -43,7 +43,7 @@ main_keyboard = ReplyKeyboardMarkup(
     keyboard=[
         ["Старт", "Дата"],
         ["Обновить Интервалы", "Рестарт"],
-        ["Состояние"]
+        ["Состояние", "Очистить_Vacancies"]
     ],
     resize_keyboard=True
 )
@@ -123,6 +123,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await restart_bot(update, context)
     elif text == "состояние":
         await get_status(update, context)
+    elif text == "очистить_vacancies":
+    resp = requests.post(GAS_WEB_APP_URL, json={"clear_vacancies": True}, timeout=15)
     else:
         await set_new_date(update, context)
 
