@@ -16,8 +16,6 @@ from telegram.ext import (
 import threading
 import traceback
 
-# === Разрешённые пользователи ===
-ALLOWED_USERS = {527852428, 1411866927}
 
 # === Logging ===
 logging.basicConfig(
