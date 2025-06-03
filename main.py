@@ -110,11 +110,17 @@ async def get_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         resp = requests.post(GAS_WEB_APP_URL, json={"spreadsheet_id": sheet_id, "action": "status"}, timeout=30)
         data = resp.json()
+        # Запрашиваем также дату обработки
+        resp_date = requests.post(GAS_WEB_APP_URL, json={"spreadsheet_id": sheet_id}, timeout=15)
+        date_data = resp_date.json()
+        process_date = date_data.get("date", "-")
+
         sum_result = data.get("sum_result")
         last_date_time = data.get("last_date_time")
         total = data.get("total_intervals")
         processed = data.get("processed_intervals")
         msg = (
+            f"Дата обработки: {process_date}\n"
             f"Сумма result: {sum_result}\n"
             f"Последняя дата: {last_date_time}\n"
             f"Всего интервалов: {total}\n"
