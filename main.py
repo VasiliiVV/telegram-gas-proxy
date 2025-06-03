@@ -35,6 +35,8 @@ if not TELEGRAM_TOKEN or not GAS_WEB_APP_URL:
 SPREADSHEET_IDS = {
     "5": "1pRomG_o3T4a6N0ASPq-zlrIv_0hQ7EODZYmdU0iz33U",
     "4": "1wdmm4o5Q6j9HCYD18BTpruUqJK8ErL7F4WI1KwupE7E",
+    "3": "1czq9G66AwmUTeT1lcqCNfZAweF2FwIEa91fAaiOKGp8",
+    "2": "1sJnM4Rc9eBqINgy-yFRGLBiv3y6R9Sh-aI_uQ9L7ItI",
 }
 USER_CURRENT_SHEET = {}  # user_id: spreadsheet_id
 
@@ -49,10 +51,11 @@ ptb_loop = asyncio.new_event_loop()
 main_keyboard = ReplyKeyboardMarkup(
     keyboard=[
         ["Старт", "Рестарт"],
+        ["Выбрать файл 2", "Выбрать файл 3"],
+        ["Выбрать файл 4", "Выбрать файл 5"],
         ["Дата", "Обновить Интервалы"],
         ["Состояние", "Сохранить по дате"],
-        ["Очистить vacancies"],
-        ["Выбрать файл 4", "Выбрать файл 5"]
+        ["Очистить vacancies"]
     ],
     resize_keyboard=True
 )
