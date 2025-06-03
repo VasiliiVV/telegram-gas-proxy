@@ -124,7 +124,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await restart_bot(update, context)
     elif text == "состояние":
         await get_status(update, context)
-    elif text == "Очистить vacancies":
+    elif text == "очистить vacancies":
         try:
             resp = requests.post(GAS_WEB_APP_URL, json={"clear_vacancies": True}, timeout=15)
             data = resp.json()
@@ -134,7 +134,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await update.message.reply_text(f"Ошибка очистки: {data.get('message', 'Неизвестная ошибка')}")
         except Exception as e:
             await update.message.reply_text(f"Ошибка GAS: {e}")
-    elif text == "Сохранить по дате":
+    elif text == "сохранить по дате":
         try:
             resp = requests.post(GAS_WEB_APP_URL, json={"copy_by_date": True}, timeout=15)
             data = resp.json()
