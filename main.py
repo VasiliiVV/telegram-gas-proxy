@@ -124,7 +124,15 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif text == "состояние":
         await get_status(update, context)
     elif text == "очистить_vacancies":
-    resp = requests.post(GAS_WEB_APP_URL, json={"clear_vacancies": True}, timeout=15)
+        try:
+            resp = requests.post(GAS_WEB_APP_URL, json={"clear_vacancies": True}, timeout=15)
+            data = resp.json()
+            if data.get("status") == "ok":
+                await update.message.reply_text("Лист Vacancies успешно очищен!")
+            else:
+                await update.message.reply_text(f"Ошибка очистки: {data.get('message', 'Неизвестная ошибка')}")
+        except Exception as e:
+            await update.message.reply_text(f"Ошибка GAS: {e}")
     else:
         await set_new_date(update, context)
 
