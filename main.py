@@ -87,7 +87,7 @@ async def update_intervals(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Сначала выберите файл (кнопка ниже).")
         return
     try:
-        resp = requests.post(GAS_WEB_APP_URL, json={"spreadsheet_id": sheet_id, "update_intervals": True}, timeout=15)
+        resp = requests.post(GAS_WEB_APP_URL, json={"spreadsheet_id": sheet_id, "update_intervals": True}, timeout=30)
         data = resp.json()
         if data.get("status") == "ok":
             await update.message.reply_text("Интервалы успешно обновлены!")
@@ -108,11 +108,18 @@ async def get_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Сначала выберите файл (кнопка ниже).")
         return
     try:
-        resp = requests.post(GAS_WEB_APP_URL, json={"spreadsheet_id": sheet_id, "action": "status"}, timeout=15)
+        resp = requests.post(GAS_WEB_APP_URL, json={"spreadsheet_id": sheet_id, "action": "status"}, timeout=30)
         data = resp.json()
         sum_result = data.get("sum_result")
         last_date_time = data.get("last_date_time")
-        msg = f"Сумма result: {sum_result}\nПоследняя дата: {last_date_time}"
+        total = data.get("total_intervals")
+        processed = data.get("processed_intervals")
+        msg = (
+            f"Сумма result: {sum_result}\n"
+            f"Последняя дата: {last_date_time}\n"
+            f"Всего интервалов: {total}\n"
+            f"Обработано: {processed}"
+        )
         await update.message.reply_text(msg)
     except Exception as e:
         await update.message.reply_text(f"Ошибка при получении состояния: {e}")
