@@ -43,7 +43,8 @@ main_keyboard = ReplyKeyboardMarkup(
     keyboard=[
         ["Старт", "Дата"],
         ["Обновить Интервалы", "Рестарт"],
-        ["Состояние", "Очистить_Vacancies"]
+        ["Состояние", "Очистить_Vacancies"],
+        ["копировать_по_дате"]
     ],
     resize_keyboard=True
 )
@@ -131,6 +132,16 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await update.message.reply_text("Лист Vacancies успешно очищен!")
             else:
                 await update.message.reply_text(f"Ошибка очистки: {data.get('message', 'Неизвестная ошибка')}")
+        except Exception as e:
+            await update.message.reply_text(f"Ошибка GAS: {e}")
+    elif text == "копировать_по_дате":
+        try:
+            resp = requests.post(GAS_WEB_APP_URL, json={"copy_by_date": True}, timeout=15)
+            data = resp.json()
+            if data.get("status") == "ok":
+                await update.message.reply_text(f"Файл скопирован! {data['message']}")
+            else:
+                await update.message.reply_text(f"Ошибка: {data.get('message', 'Неизвестная ошибка')}")
         except Exception as e:
             await update.message.reply_text(f"Ошибка GAS: {e}")
     else:
