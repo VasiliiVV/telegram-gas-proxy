@@ -31,6 +31,13 @@ if not TELEGRAM_TOKEN or not GAS_WEB_APP_URL:
     logger.error("Set TELEGRAM_TOKEN and GAS_WEB_APP_URL in environment!")
     sys.exit(1)
 
+# === Spreadsheet IDs ===
+SPREADSHEET_IDS = {
+    "5": "1pRomG_o3T4a6N0ASPq-zlrIv_0hQ7EODZYmdU0iz33U",
+    "4": "1wdmm4o5Q6j9HCYD18BTpruUqJK8ErL7F4WI1KwupE7E",
+}
+USER_CURRENT_SHEET = {}  # user_id: spreadsheet_id
+
 # === Flask ===
 app = Flask(__name__)
 
@@ -44,7 +51,8 @@ main_keyboard = ReplyKeyboardMarkup(
         ["Старт", "Рестарт"],
         ["Дата", "Обновить Интервалы"],
         ["Состояние", "Сохранить по дате"],
-        ["Очистить vacancies"]
+        ["Очистить vacancies"],
+        ["Выбрать файл 4", "Выбрать файл 5"]
     ],
     resize_keyboard=True
 )
@@ -57,8 +65,13 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def date(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.message.from_user.id
+    sheet_id = USER_CURRENT_SHEET.get(user_id)
+    if not sheet_id:
+        await update.message.reply_text("Сначала выберите файл (кнопка ниже).")
+        return
     try:
-        resp = requests.get(GAS_WEB_APP_URL, timeout=15)
+        resp = requests.post(GAS_WEB_APP_URL, json={"spreadsheet_id": sheet_id}, timeout=15)
         data = resp.json()
         if data.get("date"):
             await update.message.reply_text(f"Текущая дата: {data['date']}\nКакую дату ставим?")
@@ -68,8 +81,13 @@ async def date(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"Ошибка соединения с таблицей: {e}")
 
 async def update_intervals(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.message.from_user.id
+    sheet_id = USER_CURRENT_SHEET.get(user_id)
+    if not sheet_id:
+        await update.message.reply_text("Сначала выберите файл (кнопка ниже).")
+        return
     try:
-        resp = requests.post(GAS_WEB_APP_URL, json={"update_intervals": True}, timeout=15)
+        resp = requests.post(GAS_WEB_APP_URL, json={"spreadsheet_id": sheet_id, "update_intervals": True}, timeout=15)
         data = resp.json()
         if data.get("status") == "ok":
             await update.message.reply_text("Интервалы успешно обновлены!")
@@ -84,8 +102,13 @@ async def restart_bot(update: Update, context: ContextTypes.DEFAULT_TYPE):
     sys.exit(0)
 
 async def get_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.message.from_user.id
+    sheet_id = USER_CURRENT_SHEET.get(user_id)
+    if not sheet_id:
+        await update.message.reply_text("Сначала выберите файл (кнопка ниже).")
+        return
     try:
-        resp = requests.get(f"{GAS_WEB_APP_URL}?action=status", timeout=15)
+        resp = requests.post(GAS_WEB_APP_URL, json={"spreadsheet_id": sheet_id, "action": "status"}, timeout=15)
         data = resp.json()
         sum_result = data.get("sum_result")
         last_date_time = data.get("last_date_time")
@@ -95,13 +118,16 @@ async def get_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"Ошибка при получении состояния: {e}")
 
 async def set_new_date(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not update.message or not update.message.text:
+    user_id = update.message.from_user.id
+    sheet_id = USER_CURRENT_SHEET.get(user_id)
+    if not update.message or not update.message.text or not sheet_id:
+        await update.message.reply_text("Сначала выберите файл (кнопка ниже).")
         return
     new_date = update.message.text.strip()
     import re
     if re.match(r"^([0-2][0-9]|3[0-1])\.(0[1-9]|1[0-2])\.(\d{4})$", new_date):
         try:
-            resp = requests.post(GAS_WEB_APP_URL, json={"new_date": new_date}, timeout=15)
+            resp = requests.post(GAS_WEB_APP_URL, json={"spreadsheet_id": sheet_id, "new_date": new_date}, timeout=15)
             data = resp.json()
             if data.get("status") == "ok":
                 await update.message.reply_text(f"Новая дата {new_date} установлена")
@@ -113,7 +139,19 @@ async def set_new_date(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or not update.message.text:
         return
+    user_id = update.message.from_user.id
     text = update.message.text.strip().lower()
+
+    # === Выбор файла ===
+    if text.startswith("выбрать файл"):
+        num = text.split()[-1]
+        if num in SPREADSHEET_IDS:
+            USER_CURRENT_SHEET[user_id] = SPREADSHEET_IDS[num]
+            await update.message.reply_text(f"Выбран файл №{num}")
+        else:
+            await update.message.reply_text("Такого файла нет!")
+        return
+
     if text in ["/start", "старт"]:
         await start(update, context)
     elif text == "дата":
@@ -125,8 +163,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif text == "состояние":
         await get_status(update, context)
     elif text == "очистить vacancies":
+        sheet_id = USER_CURRENT_SHEET.get(user_id)
+        if not sheet_id:
+            await update.message.reply_text("Сначала выберите файл (кнопка ниже).")
+            return
         try:
-            resp = requests.post(GAS_WEB_APP_URL, json={"clear_vacancies": True}, timeout=15)
+            resp = requests.post(GAS_WEB_APP_URL, json={"spreadsheet_id": sheet_id, "clear_vacancies": True}, timeout=15)
             data = resp.json()
             if data.get("status") == "ok":
                 await update.message.reply_text("Лист Vacancies успешно очищен!")
@@ -135,8 +177,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception as e:
             await update.message.reply_text(f"Ошибка GAS: {e}")
     elif text == "сохранить по дате":
+        sheet_id = USER_CURRENT_SHEET.get(user_id)
+        if not sheet_id:
+            await update.message.reply_text("Сначала выберите файл (кнопка ниже).")
+            return
         try:
-            resp = requests.post(GAS_WEB_APP_URL, json={"copy_by_date": True}, timeout=15)
+            resp = requests.post(GAS_WEB_APP_URL, json={"spreadsheet_id": sheet_id, "copy_by_date": True}, timeout=15)
             data = resp.json()
             if data.get("status") == "ok":
                 await update.message.reply_text(f"Файл скопирован! {data['message']}")
