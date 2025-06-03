@@ -16,6 +16,9 @@ from telegram.ext import (
 import threading
 import traceback
 
+# === Разрешённые пользователи ===
+ALLOWED_USERS = {527852428, 1411866927}
+
 # === Logging ===
 logging.basicConfig(
     format="%(asctime)s - %(levelname)s - %(message)s",
@@ -63,12 +66,19 @@ main_keyboard = ReplyKeyboardMarkup(
 # === Хендлеры ===
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.message.from_user.id
+    if user_id not in ALLOWED_USERS:
+        await update.message.reply_text("У вас нет доступа к этому боту.")
+        return
     await update.message.reply_text(
         "Добро пожаловать! Выбери действие:", reply_markup=main_keyboard
     )
 
 async def date(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.message.from_user.id
+    if user_id not in ALLOWED_USERS:
+        await update.message.reply_text("У вас нет доступа к этому боту.")
+        return
     sheet_id = USER_CURRENT_SHEET.get(user_id)
     if not sheet_id:
         await update.message.reply_text("Сначала выберите файл (кнопка ниже).")
@@ -85,6 +95,9 @@ async def date(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def update_intervals(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.message.from_user.id
+    if user_id not in ALLOWED_USERS:
+        await update.message.reply_text("У вас нет доступа к этому боту.")
+        return
     sheet_id = USER_CURRENT_SHEET.get(user_id)
     if not sheet_id:
         await update.message.reply_text("Сначала выберите файл (кнопка ниже).")
@@ -100,12 +113,19 @@ async def update_intervals(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"Ошибка GAS: {e}")
 
 async def restart_bot(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.message.from_user.id
+    if user_id not in ALLOWED_USERS:
+        await update.message.reply_text("У вас нет доступа к этому боту.")
+        return
     await update.message.reply_text("Бот будет перезапущен...")
     await context.application.stop()
     sys.exit(0)
 
 async def get_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.message.from_user.id
+    if user_id not in ALLOWED_USERS:
+        await update.message.reply_text("У вас нет доступа к этому боту.")
+        return
     sheet_id = USER_CURRENT_SHEET.get(user_id)
     if not sheet_id:
         await update.message.reply_text("Сначала выберите файл (кнопка ниже).")
@@ -113,7 +133,7 @@ async def get_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         resp = requests.post(GAS_WEB_APP_URL, json={"spreadsheet_id": sheet_id, "action": "status"}, timeout=30)
         data = resp.json()
-        # Запрашиваем также дату обработки
+        # Запрашиваем дату обработки отдельно
         resp_date = requests.post(GAS_WEB_APP_URL, json={"spreadsheet_id": sheet_id}, timeout=15)
         date_data = resp_date.json()
         process_date = date_data.get("date", "-")
@@ -135,6 +155,9 @@ async def get_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def set_new_date(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.message.from_user.id
+    if user_id not in ALLOWED_USERS:
+        await update.message.reply_text("У вас нет доступа к этому боту.")
+        return
     sheet_id = USER_CURRENT_SHEET.get(user_id)
     if not update.message or not update.message.text or not sheet_id:
         await update.message.reply_text("Сначала выберите файл (кнопка ниже).")
@@ -156,6 +179,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or not update.message.text:
         return
     user_id = update.message.from_user.id
+
+    # === Проверка доступа ===
+    if user_id not in ALLOWED_USERS:
+        await update.message.reply_text("У вас нет доступа к этому боту.")
+        return
+
     text = update.message.text.strip().lower()
 
     # === Выбор файла ===
